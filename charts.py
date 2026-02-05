@@ -31,22 +31,29 @@ def _shade_ranges(ax, low: float, high: float):
 def daily_curve(rows) -> BytesIO:
     # Столбчатая диаграмма всех замеров за день
     grouped = _group_by_date(rows)
-    dates = sorted(grouped.keys())
+    dates = sorted(grouped.keys(), key=lambda d: datetime.strptime(d, "%Y-%m-%d"))
     fig, ax = plt.subplots(figsize=(10, 4))
 
     x_values = []
     y_values = []
+    widths = []
     labels = []
+    day_span = 0.8
     for day_index, day in enumerate(dates):
         day_rows = sorted(grouped[day], key=lambda r: r["time"])
         count = len(day_rows)
+        if count == 0:
+            continue
+        bar_width = day_span / count
+        left_edge = day_index - day_span / 2
         for idx, row in enumerate(day_rows):
-            x = day_index + (idx + 1) / (count + 1)
+            x = left_edge + bar_width * (idx + 0.5)
             x_values.append(x)
             y_values.append(row["amount"])
+            widths.append(bar_width)
         labels.append(day)
 
-    ax.bar(x_values, y_values, color="#4dabf7")
+    ax.bar(x_values, y_values, width=widths, color="#4dabf7", align="center")
     _shade_ranges(ax, 4, 10)
     ax.set_title("Суточная кривая")
     ax.set_ylabel("Уровень сахара")
