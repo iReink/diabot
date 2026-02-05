@@ -178,26 +178,49 @@ def stats_table(rows, max_rows: int = 18) -> list[BytesIO]:
     dates = sorted(grouped.keys(), reverse=True)
     tables = []
 
-    def _row_values(day_rows):
-        # Берём ранний, средний по времени и поздний замеры
-        first = day_rows[0]["amount"]
-        last = day_rows[-1]["amount"]
-        middle = day_rows[len(day_rows) // 2]["amount"]
-        return first, middle, last
+    def _row_values(day_rows, other_columns: int):
+        by_tag = {}
+        for row in day_rows:
+            tag = row["tag"]
+            if tag not in by_tag:
+                by_tag[tag] = row
+        amps = by_tag.get("AMPS")
+        peak = by_tag.get("PEAK")
+        pmps = by_tag.get("PMPS")
+        other_rows = [row for row in day_rows if row["tag"] == "OTHER"]
+        other_cells = [
+            f"{row['amount']:.1f} ({row['time']})"
+            for row in other_rows
+        ]
+        if len(other_cells) < other_columns:
+            other_cells.extend([""] * (other_columns - len(other_cells)))
+        return (
+            f"{amps['amount']:.1f}" if amps else "",
+            f"{peak['amount']:.1f}" if peak else "",
+            f"{pmps['amount']:.1f}" if pmps else "",
+            other_cells,
+        )
+
+    other_counts = [
+        len([row for row in grouped[day] if row["tag"] == "OTHER"])
+        for day in dates
+    ]
+    max_other = max(other_counts) if other_counts else 0
 
     rows_data = []
     for day in dates:
         day_rows = sorted(grouped[day], key=lambda r: r["time"])
-        first, middle, last = _row_values(day_rows)
-        rows_data.append([day, f"{first:.1f}", f"{middle:.1f}", f"{last:.1f}"])
+        amps, peak, pmps, other_cells = _row_values(day_rows, max_other)
+        rows_data.append([day, amps, peak, pmps, *other_cells])
 
     for start in range(0, len(rows_data), max_rows):
         chunk = rows_data[start : start + max_rows]
-        fig, ax = plt.subplots(figsize=(8, 0.4 * (len(chunk) + 2)))
+        total_columns = 4 + max_other
+        fig, ax = plt.subplots(figsize=(max(8, 1.4 * total_columns), 0.4 * (len(chunk) + 2)))
         ax.axis("off")
         table = ax.table(
             cellText=chunk,
-            colLabels=["Дата", "Ранний", "Средний", "Поздний"],
+            colLabels=["Дата", "AMPS", "PEAK", "PMPS", *[""] * max_other],
             loc="center",
         )
         table.scale(1, 1.3)
