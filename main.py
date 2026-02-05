@@ -4,6 +4,7 @@ from pathlib import Path
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.base import StorageKey
 from aiogram.types import (
     BufferedInputFile,
     CallbackQuery,
@@ -28,6 +29,67 @@ from states import EditCat, Measure, RegisterCat
 from utils import parse_measure, parse_peak, parse_time
 
 router = Router()
+
+
+def reminder_context(message: Message, state: FSMContext) -> FSMContext:
+    return FSMContext(
+        storage=state.storage,
+        key=StorageKey(
+            bot_id=message.bot.id,
+            chat_id=message.chat.id,
+            user_id=message.chat.id,
+        ),
+    )
+
+
+async def handle_measure_value(message: Message, state: FSMContext) -> None:
+    # Запись замера и проверка уведомлений
+    if not message.text:
+        await message.answer("Нужно число, например 6.4")
+        return
+    value = parse_measure(message.text)
+    if value is None:
+        await message.answer("Нужно число, например 6.4")
+        return
+
+    data = await state.get_data()
+    tag = data.get("tag", "OTHER")
+    name = data.get("name")
+    cat = db.get_cat_by_chat_and_name(message.chat.id, name) if name else None
+    if not cat:
+        await message.answer("Не найден пациент, начните с /start.")
+        await state.clear()
+        return
+
+    db.add_measure(
+        chat_id=message.chat.id,
+        user_id=message.from_user.id,
+        name=name,
+        amount=value,
+        tag=tag,
+    )
+
+    await message.answer("Замер записан.", reply_markup=ReplyKeyboardRemove())
+    await state.clear()
+
+    if value < 4:
+        await message.answer(
+            "❗ Срочно: значение ниже 4. Возможна гипогликемия. "
+            "Уточните состояние питомца и действуйте по плану врача."
+        )
+
+    avg_glucose = notifications.average_glucose_last_days(message.chat.id, name, 7)
+    if avg_glucose is not None and avg_glucose < 9:
+        await message.answer("✅ Средняя глюкоза за 7 дней ниже 9 — прогресс к ремиссии!")
+
+    if tag == "AMPS" and value > 10:
+        await message.answer(
+            f"Показатель выше 10. Не забудьте инсулин в {cat['am_time']}."
+        )
+    if tag == "PMPS" and value > 10:
+        await message.answer(
+            f"Показатель выше 10. Не забудьте инсулин в {cat['pm_time']}."
+        )
 
 
 def load_token() -> str:
@@ -429,55 +491,25 @@ async def measure_tag(callback: CallbackQuery, state: FSMContext):
 
 @router.message(Measure.value)
 async def measure_value(message: Message, state: FSMContext):
-    # Запись замера и проверка уведомлений
-    value = parse_measure(message.text)
-    if value is None:
-        await message.answer("Нужно число, например 6.4")
+    await handle_measure_value(message, state)
+
+
+@router.message()
+async def measure_value_from_reminder(message: Message, state: FSMContext):
+    if not message.text:
         return
-
-    data = await state.get_data()
-    tag = data.get("tag", "OTHER")
-    name = data.get("name")
-    cat = db.get_cat_by_chat_and_name(message.chat.id, name) if name else None
-    if not cat:
-        await message.answer("Не найден пациент, начните с /start.")
-        await state.clear()
+    if message.text.casefold() == "отмена":
         return
-
-    db.add_measure(
-        chat_id=message.chat.id,
-        user_id=message.from_user.id,
-        name=name,
-        amount=value,
-        tag=tag,
-    )
-
-    await message.answer("Замер записан.", reply_markup=ReplyKeyboardRemove())
-    await state.clear()
-
-    if value < 4:
-        await message.answer(
-            "❗ Срочно: значение ниже 4. Возможна гипогликемия. "
-            "Уточните состояние питомца и действуйте по плану врача."
-        )
-
-    avg_glucose = notifications.average_glucose_last_days(message.chat.id, name, 7)
-    if avg_glucose is not None and avg_glucose < 9:
-        await message.answer("✅ Средняя глюкоза за 7 дней ниже 9 — прогресс к ремиссии!")
-
-    if tag == "AMPS" and value > 10:
-        await message.answer(
-            f"Показатель выше 10. Не забудьте инсулин в {cat['am_time']}."
-        )
-    if tag == "PMPS" and value > 10:
-        await message.answer(
-            f"Показатель выше 10. Не забудьте инсулин в {cat['pm_time']}."
-        )
+    reminder_state = reminder_context(message, state)
+    if await reminder_state.get_state() != Measure.value.state:
+        return
+    await handle_measure_value(message, reminder_state)
 
 
 @router.message(F.text.casefold() == "отмена")
 async def cancel_any(message: Message, state: FSMContext):
     await state.clear()
+    await reminder_context(message, state).clear()
     await message.answer("Действие отменено.", reply_markup=ReplyKeyboardRemove())
 
 
