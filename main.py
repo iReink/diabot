@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F, Router
@@ -15,10 +16,13 @@ from aiogram.types import (
 import charts
 import db
 import notifications
+import measure_flow
+from help import help_router
 from keyboards import (
     back_keyboard,
     cancel_keyboard,
     charts_menu_keyboard,
+    inline_cancel_keyboard,
     main_menu_keyboard,
     measure_tags_keyboard,
     register_keyboard,
@@ -42,15 +46,15 @@ def reminder_context(message: Message, state: FSMContext) -> FSMContext:
     )
 
 
-async def handle_measure_value(message: Message, state: FSMContext) -> None:
+async def handle_measure_value(message: Message, state: FSMContext) -> bool:
     # Запись замера и проверка уведомлений
     if not message.text:
         await message.answer("Нужно число, например 6.4")
-        return
+        return False
     value = parse_measure(message.text)
     if value is None:
         await message.answer("Нужно число, например 6.4")
-        return
+        return False
 
     data = await state.get_data()
     tag = data.get("tag", "OTHER")
@@ -59,7 +63,7 @@ async def handle_measure_value(message: Message, state: FSMContext) -> None:
     if not cat:
         await message.answer("Не найден пациент, начните с /start.")
         await state.clear()
-        return
+        return True
 
     db.add_measure(
         chat_id=message.chat.id,
@@ -90,6 +94,7 @@ async def handle_measure_value(message: Message, state: FSMContext) -> None:
         await message.answer(
             f"Показатель выше 10. Не забудьте инсулин в {cat['pm_time']}."
         )
+    return True
 
 
 def load_token() -> str:
@@ -123,6 +128,19 @@ def settings_menu_text(cat) -> str:
         f"Вечернее время: {cat['pm_time']}\n"
         f"Активно: {'да' if cat['is_active'] else 'нет'}"
     )
+
+
+def _stats_labels(cat) -> dict[str, str]:
+    am_time = cat["am_time"]
+    pm_time = cat["pm_time"]
+    peak_hours = int(cat["peak"])
+    base = datetime.strptime(am_time, "%H:%M")
+    peak_time = (base + timedelta(hours=peak_hours)).time().strftime("%H:%M")
+    return {
+        "AMPS": f"AMPS ({am_time})",
+        "PEAK": f"PEAK ({peak_time})",
+        "PMPS": f"PMPS ({pm_time})",
+    }
 
 
 @router.message(CommandStart())
@@ -202,7 +220,7 @@ async def menu_stats(callback: CallbackQuery):
 
     await callback.message.answer(message_text)
 
-    tables = charts.stats_table(rows)
+    tables = charts.stats_table(rows, labels=_stats_labels(cat))
     for table in tables:
         await callback.message.answer_photo(BufferedInputFile(table.getvalue(), filename="stats.png"))
 
@@ -472,7 +490,7 @@ async def measure_start(message: Message, state: FSMContext):
     )
 
 
-@router.callback_query(F.data.startswith("measure:"))
+@router.callback_query(F.data.startswith("measure:") & (F.data != "measure:cancel"))
 async def measure_tag(callback: CallbackQuery, state: FSMContext):
     cat = db.get_cat_by_chat(callback.message.chat.id)
     if not cat:
@@ -484,7 +502,7 @@ async def measure_tag(callback: CallbackQuery, state: FSMContext):
     await state.update_data(tag=tag, name=cat["name"])
     await callback.message.answer(
         f"Введите значение сахара для тега {tag} (например 5.6):",
-        reply_markup=cancel_keyboard(),
+        reply_markup=inline_cancel_keyboard(),
     )
     await callback.answer()
 
@@ -501,15 +519,33 @@ async def measure_value_from_reminder(message: Message, state: FSMContext):
     if message.text.casefold() == "отмена":
         return
     reminder_state = reminder_context(message, state)
-    if await reminder_state.get_state() != Measure.value.state:
+    if await reminder_state.get_state() == Measure.value.state:
+        await handle_measure_value(message, reminder_state)
         return
-    await handle_measure_value(message, reminder_state)
+    pending = measure_flow.get_pending_measure(message.chat.id)
+    if not pending:
+        return
+    await reminder_state.update_data(tag=pending.tag, name=pending.name)
+    was_saved = await handle_measure_value(message, reminder_state)
+    if was_saved:
+        measure_flow.clear_pending_measure(message.chat.id)
+
+
+@router.callback_query(F.data == "measure:cancel")
+async def measure_cancel(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await reminder_context(callback.message, state).clear()
+    measure_flow.clear_pending_measure(callback.message.chat.id)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer("Действие отменено.", reply_markup=ReplyKeyboardRemove())
+    await callback.answer()
 
 
 @router.message(F.text.casefold() == "отмена")
 async def cancel_any(message: Message, state: FSMContext):
     await state.clear()
     await reminder_context(message, state).clear()
+    measure_flow.clear_pending_measure(message.chat.id)
     await message.answer("Действие отменено.", reply_markup=ReplyKeyboardRemove())
 
 
@@ -524,6 +560,7 @@ async def main():
     bot = Bot(token=token)
     dispatcher = Dispatcher()
     dispatcher.include_router(router)
+    dispatcher.include_router(help_router)
     dispatcher.startup.register(on_startup)
     await dispatcher.start_polling(bot)
 
