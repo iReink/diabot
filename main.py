@@ -556,6 +556,7 @@ async def on_startup(bot: Bot, dispatcher: Dispatcher):
 
 
 async def main():
+    db.ensure_schema()
     token = load_token()
     bot = Bot(token=token)
     dispatcher = Dispatcher()

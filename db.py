@@ -7,6 +7,72 @@ from typing import Iterable, Optional
 DB_PATH = "data.db"
 
 
+def ensure_schema() -> None:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA foreign_keys = OFF")
+        fk_rows = conn.execute("PRAGMA foreign_key_list(measure)").fetchall()
+        needs_migration = any(row["from"] == "user_id" for row in fk_rows)
+        if not needs_migration:
+            return
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cats_new (
+                chat_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                am_time TEXT NOT NULL,
+                peak INTEGER NOT NULL,
+                pm_time TEXT NOT NULL,
+                PRIMARY KEY (chat_id, name)
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO cats_new (chat_id, user_id, name, is_active, am_time, peak, pm_time)
+            SELECT chat_id, user_id, name, is_active, am_time, peak, pm_time
+            FROM cats
+            GROUP BY chat_id, name
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS measure_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                date TEXT NOT NULL,
+                time TEXT NOT NULL,
+                amount REAL NOT NULL CHECK (amount >= 0),
+                tag TEXT NOT NULL,
+                FOREIGN KEY (chat_id, name)
+                    REFERENCES cats_new (chat_id, name)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO measure_new (id, chat_id, user_id, name, date, time, amount, tag)
+            SELECT id, chat_id, user_id, name, date, time, amount, tag
+            FROM measure
+            """
+        )
+        conn.execute("DROP TABLE measure")
+        conn.execute("DROP TABLE cats")
+        conn.execute("ALTER TABLE cats_new RENAME TO cats")
+        conn.execute("ALTER TABLE measure_new RENAME TO measure")
+        conn.commit()
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.close()
+
+
 @contextmanager
 def get_connection():
     # Контекст для безопасного открытия/закрытия SQLite
