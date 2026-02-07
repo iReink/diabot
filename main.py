@@ -512,7 +512,7 @@ async def measure_value(message: Message, state: FSMContext):
     await handle_measure_value(message, state)
 
 
-@router.message()
+@router.message(~Command())
 async def measure_value_from_reminder(message: Message, state: FSMContext):
     if not message.text:
         return
