@@ -20,7 +20,7 @@ def create_db(db_path: str = "data.db") -> None:
             am_time TEXT NOT NULL,
             peak INTEGER NOT NULL,
             pm_time TEXT NOT NULL,
-            PRIMARY KEY (chat_id, user_id, name)
+            PRIMARY KEY (chat_id, name)
         )
         """
     )
@@ -36,8 +36,8 @@ def create_db(db_path: str = "data.db") -> None:
             time TEXT NOT NULL,
             amount REAL NOT NULL CHECK (amount >= 0),
             tag TEXT NOT NULL,
-            FOREIGN KEY (chat_id, user_id, name)
-                REFERENCES cats (chat_id, user_id, name)
+            FOREIGN KEY (chat_id, name)
+                REFERENCES cats (chat_id, name)
                 ON DELETE CASCADE
         )
         """
