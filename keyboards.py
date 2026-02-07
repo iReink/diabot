@@ -55,6 +55,12 @@ def cancel_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
+def inline_cancel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Отмена", callback_data="measure:cancel")]]
+    )
+
+
 def measure_tags_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[

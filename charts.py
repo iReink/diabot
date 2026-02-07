@@ -180,7 +180,7 @@ def range_percent_chart(rows) -> BytesIO:
     return buffer
 
 
-def stats_table(rows, max_rows: int = 18) -> list[BytesIO]:
+def stats_table(rows, max_rows: int = 18, labels: dict[str, str] | None = None) -> list[BytesIO]:
     grouped = _group_by_date(rows)
     dates = sorted(grouped.keys(), reverse=True)
     tables = []
@@ -225,9 +225,16 @@ def stats_table(rows, max_rows: int = 18) -> list[BytesIO]:
         total_columns = 4 + max_other
         fig, ax = plt.subplots(figsize=(max(8, 1.4 * total_columns), 0.4 * (len(chunk) + 2)))
         ax.axis("off")
+        label_map = labels or {}
         table = ax.table(
             cellText=chunk,
-            colLabels=["Дата", "AMPS", "PEAK", "PMPS", *[""] * max_other],
+            colLabels=[
+                "Дата",
+                label_map.get("AMPS", "AMPS"),
+                label_map.get("PEAK", "PEAK"),
+                label_map.get("PMPS", "PMPS"),
+                *[""] * max_other,
+            ],
             loc="center",
         )
         table.scale(1, 1.3)

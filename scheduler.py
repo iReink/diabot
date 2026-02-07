@@ -8,8 +8,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 
 from db import get_cat_by_chat_and_name, list_chats
-from keyboards import cancel_keyboard
-from states import Measure
+from keyboards import inline_cancel_keyboard
+from measure_flow import set_pending_measure
 from notifications import (
     amps_peak_difference_low,
     average_glucose_last_days,
@@ -99,12 +99,13 @@ async def send_procedure_reminders(bot: Bot, storage, now: datetime):
                     storage=storage,
                     key=StorageKey(bot_id=bot.id, chat_id=chat_id, user_id=chat_id),
                 )
-                await context.set_state(Measure.value)
+                await context.clear()
                 await context.update_data(tag=tag, name=name)
+                set_pending_measure(chat_id, tag, name)
                 await bot.send_message(
                     chat_id,
                     "Введите значение сахара (например 5.6):",
-                    reply_markup=cancel_keyboard(),
+                    reply_markup=inline_cancel_keyboard(),
                 )
 
         # Пик: AMPS + peak (в часах)
@@ -127,10 +128,11 @@ async def send_procedure_reminders(bot: Bot, storage, now: datetime):
                 storage=storage,
                 key=StorageKey(bot_id=bot.id, chat_id=chat_id, user_id=chat_id),
             )
-            await context.set_state(Measure.value)
+            await context.clear()
             await context.update_data(tag="PEAK", name=name)
+            set_pending_measure(chat_id, "PEAK", name)
             await bot.send_message(
                 chat_id,
                 "Введите значение сахара (например 5.6):",
-                reply_markup=cancel_keyboard(),
+                reply_markup=inline_cancel_keyboard(),
             )
