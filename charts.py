@@ -6,6 +6,7 @@ from io import BytesIO
 from typing import Iterable
 
 import matplotlib
+from matplotlib.patches import Rectangle
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -182,8 +183,9 @@ def range_percent_chart(rows) -> BytesIO:
 
 def stats_table(rows, max_rows: int = 18, labels: dict[str, str] | None = None) -> list[BytesIO]:
     grouped = _group_by_date(rows)
-    dates = sorted(grouped.keys(), reverse=True)
+    dates = sorted(grouped.keys())
     tables = []
+    insulin_mark_color = "#d0ebff"
 
     def _row_values(day_rows, other_columns: int):
         by_tag = {}
@@ -201,12 +203,14 @@ def stats_table(rows, max_rows: int = 18, labels: dict[str, str] | None = None) 
         ]
         if len(other_cells) < other_columns:
             other_cells.extend([""] * (other_columns - len(other_cells)))
-        return (
-            f"{amps['amount']:.1f}" if amps else "",
-            f"{peak['amount']:.1f}" if peak else "",
-            f"{pmps['amount']:.1f}" if pmps else "",
-            other_cells,
-        )
+        return {
+            "amps": f"{amps['amount']:.1f}" if amps else "",
+            "peak": f"{peak['amount']:.1f}" if peak else "",
+            "pmps": f"{pmps['amount']:.1f}" if pmps else "",
+            "other_cells": other_cells,
+            "amps_insulin": bool(amps and amps["amount"] > 10),
+            "pmps_insulin": bool(pmps and pmps["amount"] > 10),
+        }
 
     other_counts = [
         len([row for row in grouped[day] if row["tag"] == "OTHER"])
@@ -215,15 +219,23 @@ def stats_table(rows, max_rows: int = 18, labels: dict[str, str] | None = None) 
     max_other = max(other_counts) if other_counts else 0
 
     rows_data = []
+    highlighted_rows = []
     for day in dates:
         day_rows = sorted(grouped[day], key=lambda r: r["time"])
-        amps, peak, pmps, other_cells = _row_values(day_rows, max_other)
-        rows_data.append([day, amps, peak, pmps, *other_cells])
+        values = _row_values(day_rows, max_other)
+        rows_data.append([day, values["amps"], values["peak"], values["pmps"], *values["other_cells"]])
+        highlighted_rows.append(
+            {
+                "amps": values["amps_insulin"],
+                "pmps": values["pmps_insulin"],
+            }
+        )
 
     for start in range(0, len(rows_data), max_rows):
         chunk = rows_data[start : start + max_rows]
+        chunk_highlights = highlighted_rows[start : start + max_rows]
         total_columns = 4 + max_other
-        fig, ax = plt.subplots(figsize=(max(8, 1.4 * total_columns), 0.4 * (len(chunk) + 2)))
+        fig, ax = plt.subplots(figsize=(max(8, 1.4 * total_columns), 0.4 * (len(chunk) + 3)))
         ax.axis("off")
         label_map = labels or {}
         table = ax.table(
@@ -237,8 +249,36 @@ def stats_table(rows, max_rows: int = 18, labels: dict[str, str] | None = None) 
             ],
             loc="center",
         )
+        for row_idx, highlights in enumerate(chunk_highlights, start=1):
+            if highlights["amps"]:
+                table[(row_idx, 1)].set_facecolor(insulin_mark_color)
+                table[(row_idx, 1)].set_alpha(0.45)
+            if highlights["pmps"]:
+                table[(row_idx, 3)].set_facecolor(insulin_mark_color)
+                table[(row_idx, 3)].set_alpha(0.45)
+
         table.scale(1, 1.3)
         ax.set_title("Статистика измерений")
+        ax.add_patch(
+            Rectangle(
+                (0.02, -0.06),
+                0.03,
+                0.03,
+                transform=ax.transAxes,
+                color=insulin_mark_color,
+                alpha=0.45,
+                clip_on=False,
+            )
+        )
+        ax.text(
+            0.06,
+            -0.045,
+            "после измерения был введён инсулин",
+            transform=ax.transAxes,
+            ha="left",
+            va="center",
+            fontsize=9,
+        )
         fig.tight_layout()
         buffer = BytesIO()
         fig.savefig(buffer, format="png", bbox_inches="tight")
