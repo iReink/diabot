@@ -220,9 +220,14 @@ async def menu_stats(callback: CallbackQuery):
 
     await callback.message.answer(message_text)
 
-    tables = charts.stats_table(rows, labels=_stats_labels(cat))
+    labels = _stats_labels(cat)
+    tables = charts.stats_table(rows, labels=labels)
     for table in tables:
         await callback.message.answer_photo(BufferedInputFile(table.getvalue(), filename="stats.png"))
+    stats_pdf = charts.stats_table_pdf(rows, labels=labels)
+    await callback.message.answer_document(
+        BufferedInputFile(stats_pdf.getvalue(), filename="stats.pdf")
+    )
 
     await callback.answer()
 

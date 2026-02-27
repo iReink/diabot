@@ -6,6 +6,7 @@ from io import BytesIO
 from typing import Iterable
 
 import matplotlib
+from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.patches import Rectangle
 
 matplotlib.use("Agg")
@@ -181,10 +182,14 @@ def range_percent_chart(rows) -> BytesIO:
     return buffer
 
 
-def stats_table(rows, max_rows: int = 18, labels: dict[str, str] | None = None) -> list[BytesIO]:
+def _build_stats_table_figures(
+    rows,
+    max_rows: int = 28,
+    labels: dict[str, str] | None = None,
+):
     grouped = _group_by_date(rows)
     dates = sorted(grouped.keys())
-    tables = []
+    figures = []
     insulin_mark_color = "#d0ebff"
 
     def _row_values(day_rows, other_columns: int):
@@ -235,7 +240,7 @@ def stats_table(rows, max_rows: int = 18, labels: dict[str, str] | None = None) 
         chunk = rows_data[start : start + max_rows]
         chunk_highlights = highlighted_rows[start : start + max_rows]
         total_columns = 4 + max_other
-        fig, ax = plt.subplots(figsize=(max(8, 1.4 * total_columns), 0.4 * (len(chunk) + 3)))
+        fig, ax = plt.subplots(figsize=(max(8, 1.35 * total_columns), 0.32 * (len(chunk) + 3)))
         ax.axis("off")
         label_map = labels or {}
         table = ax.table(
@@ -249,6 +254,8 @@ def stats_table(rows, max_rows: int = 18, labels: dict[str, str] | None = None) 
             ],
             loc="center",
         )
+        table.auto_set_font_size(False)
+        table.set_fontsize(8)
         for row_idx, highlights in enumerate(chunk_highlights, start=1):
             if highlights["amps"]:
                 table[(row_idx, 1)].set_facecolor(insulin_mark_color)
@@ -280,10 +287,29 @@ def stats_table(rows, max_rows: int = 18, labels: dict[str, str] | None = None) 
             fontsize=9,
         )
         fig.tight_layout()
+        figures.append(fig)
+
+    return figures
+
+
+def stats_table(rows, max_rows: int = 28, labels: dict[str, str] | None = None) -> list[BytesIO]:
+    figures = _build_stats_table_figures(rows, max_rows=max_rows, labels=labels)
+    tables = []
+    for fig in figures:
         buffer = BytesIO()
         fig.savefig(buffer, format="png", bbox_inches="tight")
         buffer.seek(0)
         plt.close(fig)
         tables.append(buffer)
-
     return tables
+
+
+def stats_table_pdf(rows, max_rows: int = 28, labels: dict[str, str] | None = None) -> BytesIO:
+    figures = _build_stats_table_figures(rows, max_rows=max_rows, labels=labels)
+    buffer = BytesIO()
+    with PdfPages(buffer) as pdf:
+        for fig in figures:
+            pdf.savefig(fig, bbox_inches="tight")
+            plt.close(fig)
+    buffer.seek(0)
+    return buffer
